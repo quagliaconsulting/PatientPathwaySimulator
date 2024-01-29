@@ -92,7 +92,7 @@ def simulate_referrals(patients, clinic_data, mode):
             if random.random() <= clinic_success_rate:
                 patient.final_diagnosis('Correct Diagnosis')
             else:
-                if random.random() > 0.75:  # Probability of incorrect diagnosis or send back to PCP
+                if random.random() > 0.9:  # Probability of incorrect diagnosis or send back to PCP
                     patient.final_diagnosis('Incorrect Diagnosis')
                 else:
                     patient.status = 'Waiting'  # Patient returns to PCP
