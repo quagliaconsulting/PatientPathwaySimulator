@@ -1,127 +1,138 @@
+import pandas as pd
 import random
-import plotly.express as px
-import plotly.graph_objects as go
+import io
+import copy
 
-# Function to generate patients
-def generate_patients(num_patients):
-    return ['Patient_' + str(i) for i in range(num_patients)]
+# Patient class to track each patient's journey
+class Patient:
+    def __init__(self, patient_id, age, disease):
+        self.patient_id = patient_id
+        self.age = age
+        self.disease = disease
+        self.status = "Waiting"
+        self.visits = []
+        self.visit_count = 0
 
-# Function to generate diseases and doctors
-def generate_entities(num, prefix):
-    return [f'{prefix}_{i}' for i in range(1, num + 1)]
+    def visit_clinic(self, clinic):
+        self.visits.append(clinic)
+        #self.status = "Referred"
+        #self.visit_count += 1
 
-# Function to assign diseases to patients
-def assign_diseases(patients, diseases):
-    return {patient: random.choice(diseases) for patient in patients}
+    def final_diagnosis(self, outcome):
+        self.status = outcome
 
-# Function to assign doctors to patients randomly (control group)
-def assign_doctors_randomly(patients, doctors):
-    return {patient: random.choice(doctors) for patient in patients}
+    def set_referral_options(self, options):
+        self.referral_options = options
 
-# Function to create a dynamic doctor-disease probability matrix
-def create_probability_matrix(num_doctors, num_diseases):
-    matrix = {}
-    max_success_rate = 0.95  # Maximum success rate
+# Function to generate patients based on the disease distribution in the data
+def generate_patients(disease_data, num_patients):
+    patients = []
+    disease_list = disease_data['Disease List'].tolist()
+    patient_distribution = disease_data['Number of Patients'].tolist()
+    total_patients = sum(patient_distribution)
 
-    for i in range(num_doctors):
-        for j in range(num_diseases):
-            doctor = f'Doctor_{i+1}'
-            disease = f'Disease_{j+1}'
+    for i, disease in enumerate(disease_list):
+        disease_patients = int((patient_distribution[i] / total_patients) * num_patients)
+        for _ in range(disease_patients):
+            patient_id = len(patients) + 1
+            age = random.randint(18, 100)  # Random age for simplicity
+            patients.append(Patient(patient_id, age, disease))
 
-            # Calculate success rate based on the difference between doctor and disease indices
-            index_difference = abs(i - j)
-            success_rate = max_success_rate * (1 - (index_difference / num_diseases))
+    return patients
 
-            matrix[(doctor, disease)] = success_rate
-    return matrix
-
-# Function to assign doctors to patients based on specialization with a given probability
-def assign_doctors_specialized(patients, patient_diseases, doctors, perfect_assignment_prob):
-    doctor_specialization = {f'Disease_{i+1}': f'Doctor_{i+1}' for i in range(len(doctors))}
-    assigned_doctors = {}
-
+# Function to simulate the PCP diagnosis process
+def simulate_pcp_diagnosis(patients, clinic_data):
     for patient in patients:
-        if random.random() < perfect_assignment_prob:
-            # Assign the specialized doctor
-            assigned_doctors[patient] = doctor_specialization[patient_diseases[patient]]
+        patient.visit_count += 1  # Increment for the PCP visit
+
+        disease_row = clinic_data[clinic_data['Disease List'] == patient.disease]
+        pcp_success_rate = disease_row['PCP'].values[0] / 100
+        referral_options = disease_row.columns[2:-1].tolist()
+        patient.set_referral_options(referral_options)
+
+        if random.random() <= pcp_success_rate:
+            patient.final_diagnosis('Correct Diagnosis')
         else:
-            # Assign a random doctor
-            assigned_doctors[patient] = random.choice(doctors)
+            # Incorrect diagnosis or referral
+            if random.random() > 0.9:
+                patient.final_diagnosis('Incorrect Diagnosis')
+            else:
+                patient.status = 'Referred'
 
-    return assigned_doctors
+    return patients
 
-# Function to simulate diagnosis with specialized doctors
-def diagnose_with_specialization(patient_doctors, patient_diseases, doctor_success_rate):
-    outcomes = {}
-    for patient, doctor in patient_doctors.items():
-        disease = patient_diseases[patient]
-        success_rate = doctor_success_rate[(doctor, disease)]
-        outcomes[patient] = 'Lives' if random.random() < success_rate else 'Dies'
-    return outcomes
 
-# Visualization function for disease assignment
-def visualize_disease_assignment(patient_diseases, title):
-    diseases = list(patient_diseases.values())
-    fig = px.histogram(diseases, title=title)
-    fig.show()
+# Function to simulate the referral process
+def simulate_referrals(patients, clinic_data, mode):
+    for patient in patients:
+        while patient.status == 'Referred' or patient.status == 'Waiting':
+            patient.visit_count += 1  # Incrementing the visit count for every visit
 
-# Visualization function for doctor assignment
-def visualize_doctor_assignment(patient_doctors, title):
-    doctor_assignments = list(patient_doctors.values())
-    fig = px.histogram(doctor_assignments, title=title)
-    fig.show()    
+            # Handle referrals or return to PCP
+            if patient.status == 'Waiting':
+                referral_options = patient.referral_options
+                unvisited_clinics = [clinic for clinic in referral_options if clinic not in patient.visits]
+                if not unvisited_clinics:
+                    patient.final_diagnosis('No Diagnosis')
+                    break
+            else:
+                disease_row = clinic_data[clinic_data['Disease List'] == patient.disease]
+                clinic_probabilities = disease_row.iloc[0, 2:-1] / 100
+                clinic_probabilities = clinic_probabilities.sort_values(ascending=False)
+                unvisited_clinics = clinic_probabilities.index.difference(patient.visits)
+                
+                if mode == 'test':
+                    referral_clinic = unvisited_clinics[0]  # Highest probability clinic
+                else:  # 'control' mode
+                    referral_clinic = random.choice(unvisited_clinics.tolist())  # Random clinic
 
-# Visualization function for comparing outcomes
-def visualize_comparison(control_outcomes, test_outcomes, title):
-    control_survival = sum(outcome == 'Lives' for outcome in control_outcomes.values())
-    test_survival = sum(outcome == 'Lives' for outcome in test_outcomes.values())
-    control_death = len(control_outcomes) - control_survival
-    test_death = len(test_outcomes) - test_survival
+            patient.visit_clinic(referral_clinic)
+            clinic_success_rate = clinic_probabilities[referral_clinic]
 
-    categories = ['Lives', 'Dies']
-    control_data = [control_survival, control_death]
-    test_data = [test_survival, test_death]
+            if random.random() <= clinic_success_rate:
+                patient.final_diagnosis('Correct Diagnosis')
+            else:
+                if random.random() > 0.75:  # Probability of incorrect diagnosis or send back to PCP
+                    patient.final_diagnosis('Incorrect Diagnosis')
+                else:
+                    patient.status = 'Waiting'  # Patient returns to PCP
 
-    fig = go.Figure(data=[
-        go.Bar(name='Control', x=categories, y=control_data),
-        go.Bar(name='Test', x=categories, y=test_data)
-    ])
+    return patients
 
-    # Change the bar mode
-    fig.update_layout(barmode='group', title=title)
-    fig.show()
+def run_simulation(file_path):
+    clinic_data = pd.read_excel(file_path)
+    clinic_data['Number of Patients'] = pd.to_numeric(clinic_data['Number of Patients'], errors='coerce')
+    clinic_data['Number of Patients'] = clinic_data['Number of Patients'].fillna(0)
+    num_patients = int(clinic_data['Number of Patients'].sum())
 
-def run_simulation(num_patients, num_doctors, num_diseases, specialized, perfect_assignment_prob=1.0):
-    patients = generate_patients(num_patients)
-    diseases = generate_entities(num_diseases, 'Disease')
-    doctors = generate_entities(num_doctors, 'Doctor')
-    patient_diseases = assign_diseases(patients, diseases)
+    patients = generate_patients(clinic_data, num_patients)
+    control_patients = [copy.deepcopy(p) for p in patients]
 
-    doctor_success_rate = create_probability_matrix(num_doctors, num_diseases)
+    test_patients = simulate_pcp_diagnosis(patients, clinic_data)
+    control_patients = simulate_pcp_diagnosis(control_patients, clinic_data)
 
-    if specialized:
-        patient_doctors = assign_doctors_specialized(patients, patient_diseases, doctors, perfect_assignment_prob)
-    else:
-        patient_doctors = assign_doctors_randomly(patients, doctors)
+    test_patients = simulate_referrals(test_patients, clinic_data, mode='test')
+    control_patients = simulate_referrals(control_patients, clinic_data, mode='control')
 
-    outcomes = diagnose_with_specialization(patient_doctors, patient_diseases, doctor_success_rate)
-    return patient_doctors, outcomes
+    test_results = {
+        'Total Patients': len(test_patients),
+        'Correctly Diagnosed': sum(p.status == 'Correct Diagnosis' for p in test_patients),
+        'Incorrectly Diagnosed': sum(p.status == 'Incorrect Diagnosis' for p in test_patients),
+        'No Diagnosis': sum(p.status == 'No Diagnosis' for p in test_patients),
+        'Average Visits': sum(p.visit_count for p in test_patients) / len(test_patients)
+    }
 
-def main():
-    num_patients = int(input("Enter the number of patients: "))
-    num_diseases = int(input("Enter the number of diseases: "))
-    num_doctors = int(input("Enter the number of doctors: "))
-    perfect_assignment_prob = float(input("Enter the probability of perfect doctor assignment (0 to 1): "))
+    control_results = {
+        'Total Patients': len(control_patients),
+        'Correctly Diagnosed': sum(p.status == 'Correct Diagnosis' for p in control_patients),
+        'Incorrectly Diagnosed': sum(p.status == 'Incorrect Diagnosis' for p in control_patients),
+        'No Diagnosis': sum(p.status == 'No Diagnosis' for p in control_patients),
+        'Average Visits': sum(p.visit_count for p in control_patients) / len(control_patients)
+    }
 
-    # Run simulation for control group (random assignment)
-    control_doctors, control_outcomes = run_simulation(num_patients, num_doctors, num_diseases, specialized=False)
-    visualize_doctor_assignment(control_doctors, "Control Group Doctor Assignments")
+    return test_results, control_results
 
-    # Run simulation for test group (specialized assignment with user-defined probability)
-    test_doctors, test_outcomes = run_simulation(num_patients, num_doctors, num_diseases, specialized=True, perfect_assignment_prob=perfect_assignment_prob)
-    visualize_doctor_assignment(test_doctors, "Test Group Doctor Assignments")
-
-    visualize_comparison(control_outcomes, test_outcomes, "Comparison of Patient Outcomes")
-
-if __name__ == "__main__":
-    main()
+file_path = 'Neurology_Sim_Parameters.xlsx'
+test_results, control_results = run_simulation(file_path)
+print("Test Set Results:", test_results)
+print("Control Set Results:", control_results)
