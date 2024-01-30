@@ -45,7 +45,7 @@ def generate_patients(disease_data, num_patients, mode):
 
     return patients
 
-def run_simulation(disease_data, num_patients, mode='test'):
+def run_simulation(disease_data, num_patients, mode='test', pcp_cowboy_factor=0.95, clinic_cowboy_factor=0.9):
     patients = generate_patients(disease_data, num_patients, mode)
 
     for patient in patients:
@@ -63,7 +63,7 @@ def run_simulation(disease_data, num_patients, mode='test'):
                     patient.final_diagnosis('Correct Diagnosis')
                     break
                 else:
-                    if random.random() > 0.95:
+                    if random.random() > pcp_cowboy_factor:  # Use the PCP cowboy factor
                         patient.final_diagnosis('Incorrect Diagnosis')
                         break
                     
@@ -103,7 +103,7 @@ def run_simulation(disease_data, num_patients, mode='test'):
                     patient.final_diagnosis('Correct Diagnosis')
                     break
                 else:
-                    if random.random() > 0.7:
+                    if random.random() > clinic_cowboy_factor:  # Use the clinic cowboy factor
                         patient.final_diagnosis('Incorrect Diagnosis')
                         break
 
@@ -186,11 +186,16 @@ def main():
 
     uploaded_file = st.file_uploader("Choose a file")
     if uploaded_file is not None:
+        # Add inputs for cowboy factors
+        pcp_cowboy_factor = st.number_input('Enter PCP Cowboy Factor (0.0-1.0)', min_value=0.0, max_value=1.0, value=0.95)
+        clinic_cowboy_factor = st.number_input('Enter Clinic Cowboy Factor (0.0-1.0)', min_value=0.0, max_value=1.0, value=0.9)
         disease_data = pd.read_excel(uploaded_file)
         num_patients = int(disease_data['Number of Patients'].sum())
 
-        test_results, test_patients = run_simulation(disease_data, num_patients, mode='test')
-        control_results, control_patients = run_simulation(disease_data, num_patients, mode='control')
+        # Pass the cowboy factors to the simulation function
+        test_results, test_patients = run_simulation(disease_data, num_patients, 'test', pcp_cowboy_factor, clinic_cowboy_factor)
+        control_results, control_patients = run_simulation(disease_data, num_patients, 'control', pcp_cowboy_factor, clinic_cowboy_factor)
+
 
         # Assuming test_patients and control_patients have the same length and corresponding patients
         for i in range(len(test_patients)):
