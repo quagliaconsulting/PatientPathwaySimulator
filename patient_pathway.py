@@ -5,13 +5,14 @@ import plotly.graph_objects as go
 import random
 
 class Patient:
-    def __init__(self, patient_id, age, disease):
+    def __init__(self, patient_id, age, disease, mode='test'):
         self.patient_id = patient_id
         self.age = age
         self.disease = disease
         self.status = "Waiting"
         self.visits = []
         self.visit_count = 0
+        self.mode = mode
 
     def visit_clinic(self, clinic):
         self.visits.append(clinic)
@@ -25,10 +26,11 @@ class Patient:
     def set_referral_options(self, options):
         self.referral_options = options
 
+    #TODO: DELETE REDUNDANT CODE BELOW
     def print_status(self):
-        print(f"Patient {self.patient_id}: Status - {self.status}, Visits - {self.visit_count}, Path - {self.visits}")
+        print(f"Patient {self.patient_id}: Status - {self.status}, Visits - {self.visit_count}, Path - {self.visits}, Mode - {self.mode}")
 
-def generate_patients(disease_data, num_patients):
+def generate_patients(disease_data, num_patients, mode):
     patients = []
     disease_list = disease_data['Disease List'].tolist()
     patient_distribution = disease_data['Number of Patients'].tolist()
@@ -39,12 +41,12 @@ def generate_patients(disease_data, num_patients):
         for _ in range(disease_patients):
             patient_id = len(patients) + 1
             age = random.randint(18, 100)
-            patients.append(Patient(patient_id, age, disease))
+            patients.append(Patient(patient_id, age, disease, mode))
 
     return patients
 
 def run_simulation(disease_data, num_patients, mode='test'):
-    patients = generate_patients(disease_data, num_patients)
+    patients = generate_patients(disease_data, num_patients, mode)
 
     for patient in patients:
         while patient.status not in ['Correct Diagnosis', 'Incorrect Diagnosis', 'No Diagnosis']:
@@ -77,6 +79,8 @@ def run_simulation(disease_data, num_patients, mode='test'):
                 disease_row = disease_data[disease_data['Disease List'] == patient.disease]
                 clinic_probabilities = disease_row.iloc[0, 2:-1] / 100
                 clinic_probabilities = clinic_probabilities.sort_values(ascending=False)
+
+                # Filter out clinics already visited
                 unvisited_clinics = clinic_probabilities.index.difference(patient.visits)
 
                 if unvisited_clinics.empty:
@@ -84,12 +88,15 @@ def run_simulation(disease_data, num_patients, mode='test'):
                     break
 
                 if mode == 'test':
-                    referral_clinic = unvisited_clinics[0]
+                    # Select the highest probability clinic that hasn't been visited yet
+                    for clinic in clinic_probabilities.index:
+                        if clinic in unvisited_clinics:
+                            referral_clinic = clinic
+                            break
                 else:
                     referral_clinic = random.choice(unvisited_clinics.tolist())
 
                 patient.visit_clinic(referral_clinic)
-
                 clinic_success_rate = clinic_probabilities[referral_clinic]
 
                 if random.random() <= clinic_success_rate:
@@ -99,7 +106,8 @@ def run_simulation(disease_data, num_patients, mode='test'):
                     if random.random() > 0.7:
                         patient.final_diagnosis('Incorrect Diagnosis')
                         break
-                    
+
+                    #TODO: DELETE REDUNDANT CODE BELOW OR DO IT BY GETTING RID OF ALL THE SINGLE BREAKS
                     # Break loop if a final diagnosis is made
                     if patient.status in ['Correct Diagnosis', 'Incorrect Diagnosis', 'No Diagnosis']:
                         break
@@ -138,35 +146,33 @@ def calculate_percentage_change(test_val, control_val):
     return ((test_val - control_val) / control_val) * 100 if control_val else float('inf')
 
 def visualize_patient_pathway(patient):
-    # Nodes for each unique location and final status
-    unique_locations = list(set(patient.visits + [patient.status]))
-    labels = unique_locations
+    # Separate treatment locations and outcome
+    treatment_locations = patient.visits
+    outcome = patient.status
 
-    # Edges for transitions between locations
-    edges = list(zip(patient.visits, patient.visits[1:] + [patient.status]))
+    # Create a unique list of locations and add the outcome at the end
+    unique_locations = list(set(treatment_locations))
+    unique_locations.sort(key=treatment_locations.index)  # Maintain the order of visits
+    unique_locations.append(outcome)
 
-    # Creating nodes and edges for the network graph
+    # Assign positions
+    node_x = {location: i for i, location in enumerate(unique_locations)}
+    node_y = {location: 0 for location in unique_locations}  # Keeping all nodes at y=0 for simplicity
+
+    # Create edges
     edge_x = []
     edge_y = []
-    node_x = []
-    node_y = []
-    for i, label in enumerate(labels):
-        node_x.append(i)
-        node_y.append(0)
-
-    for edge in edges:
-        x0, y0 = node_x[labels.index(edge[0])], node_y[labels.index(edge[0])]
-        x1, y1 = node_x[labels.index(edge[1])], node_y[labels.index(edge[1])]
+    for i in range(len(treatment_locations)):
+        x0, y0 = node_x[treatment_locations[i]], node_y[treatment_locations[i]]
+        if i < len(treatment_locations) - 1:
+            x1, y1 = node_x[treatment_locations[i + 1]], node_y[treatment_locations[i + 1]]
+        else:
+            x1, y1 = node_x[outcome], node_y[outcome]
         edge_x.extend([x0, x1, None])
         edge_y.extend([y0, y1, None])
 
-    edge_trace = go.Scatter(
-        x=edge_x, y=edge_y, line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines'
-    )
-
-    node_trace = go.Scatter(
-        x=node_x, y=node_y, text=labels, mode='markers+text', hoverinfo='text', marker=dict(size=10)
-    )
+    edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines')
+    node_trace = go.Scatter(x=list(node_x.values()), y=list(node_y.values()), text=unique_locations, mode='markers+text', hoverinfo='text', marker=dict(size=10))
 
     # Creating the figure
     fig = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(
@@ -179,7 +185,6 @@ def visualize_patient_pathway(patient):
 
     return fig
 
-
 def main():
     st.title('Patient Pathway Simulation')
 
@@ -191,10 +196,15 @@ def main():
         test_results, test_patients = run_simulation(disease_data, num_patients, mode='test')
         control_results, control_patients = run_simulation(disease_data, num_patients, mode='control')
 
-        # Print patient journeys for inspection
-        for patient in test_patients + control_patients:
-            patient.print_status()
+        # Assuming test_patients and control_patients have the same length and corresponding patients
+        for i in range(len(test_patients)):
+            test_patient = test_patients[i]
+            control_patient = control_patients[i]
 
+            print(f"Patient {test_patient.patient_id} [Test Mode]: Disease - {test_patient.disease}, Status - {test_patient.status}, Visits - {test_patient.visit_count}, Path - {test_patient.visits}")
+            print(f"Patient {control_patient.patient_id} [Control Mode]: Disease - {control_patient.disease}, Status - {control_patient.status}, Visits - {control_patient.visit_count}, Path - {control_patient.visits}")
+            print()  # Blank line for better readability
+            
         # Now use test_results and control_results as before
         st.plotly_chart(plot_combined_results(test_results, control_results))
 
