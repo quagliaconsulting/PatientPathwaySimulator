@@ -59,12 +59,18 @@ def run_simulation(disease_data, num_patients, mode='test'):
 
                 if random.random() <= pcp_success_rate:
                     patient.final_diagnosis('Correct Diagnosis')
+                    break
                 else:
-                    if random.random() > 0.9:
+                    if random.random() > 0.95:
                         patient.final_diagnosis('Incorrect Diagnosis')
-                    else:
-                        patient.status = 'Referred'
-                patient.print_status()
+                        break
+                    
+                    # Break loop if a final diagnosis is made
+                    if patient.status in ['Correct Diagnosis', 'Incorrect Diagnosis', 'No Diagnosis']:
+                        break
+
+                    patient.status = 'Referred'
+                #patient.print_status()
 
             elif patient.status == 'Referred':
                 patient.visit_count += 1
@@ -75,7 +81,7 @@ def run_simulation(disease_data, num_patients, mode='test'):
 
                 if unvisited_clinics.empty:
                     patient.final_diagnosis('No Diagnosis')
-                    continue
+                    break
 
                 if mode == 'test':
                     referral_clinic = unvisited_clinics[0]
@@ -88,11 +94,18 @@ def run_simulation(disease_data, num_patients, mode='test'):
 
                 if random.random() <= clinic_success_rate:
                     patient.final_diagnosis('Correct Diagnosis')
+                    break
                 else:
-                    if random.random() > 0.9:
+                    if random.random() > 0.7:
                         patient.final_diagnosis('Incorrect Diagnosis')
-                    else:
-                        patient.status = 'Waiting'
+                        break
+                    
+                    # Break loop if a final diagnosis is made
+                    if patient.status in ['Correct Diagnosis', 'Incorrect Diagnosis', 'No Diagnosis']:
+                        break
+
+                    patient.status = 'Waiting'
+                    #patient.print_status()
 
     results = {
         'Total Patients': len(patients),
@@ -101,6 +114,10 @@ def run_simulation(disease_data, num_patients, mode='test'):
         'No Diagnosis': sum(p.status == 'No Diagnosis' for p in patients),
         'Average Visits': sum(p.visit_count for p in patients) / len(patients)
     }
+
+        # Print patient journeys
+    for patient in patients:
+            patient.print_status()
 
     return results, patients
 
@@ -173,6 +190,10 @@ def main():
 
         test_results, test_patients = run_simulation(disease_data, num_patients, mode='test')
         control_results, control_patients = run_simulation(disease_data, num_patients, mode='control')
+
+        # Print patient journeys for inspection
+        for patient in test_patients + control_patients:
+            patient.print_status()
 
         # Now use test_results and control_results as before
         st.plotly_chart(plot_combined_results(test_results, control_results))
