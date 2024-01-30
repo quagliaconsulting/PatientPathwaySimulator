@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import random
 
 class Patient:
@@ -14,6 +15,9 @@ class Patient:
 
     def visit_clinic(self, clinic):
         self.visits.append(clinic)
+
+    def visit_pcp(self):
+        self.visits.append("PCP")
 
     def final_diagnosis(self, outcome):
         self.status = outcome
@@ -50,6 +54,8 @@ def run_simulation(disease_data, num_patients, mode='test'):
                 pcp_success_rate = disease_row['PCP'].values[0] / 100
                 referral_options = disease_row.columns[2:-1].tolist()
                 patient.set_referral_options(referral_options)
+
+                patient.visit_pcp()
 
                 if random.random() <= pcp_success_rate:
                     patient.final_diagnosis('Correct Diagnosis')
@@ -96,7 +102,7 @@ def run_simulation(disease_data, num_patients, mode='test'):
         'Average Visits': sum(p.visit_count for p in patients) / len(patients)
     }
 
-    return results
+    return results, patients
 
 def plot_combined_results(test_results, control_results):
     data = {
@@ -107,10 +113,55 @@ def plot_combined_results(test_results, control_results):
     }
     df = pd.DataFrame(data)
     fig = px.bar(df, x='Outcomes', y='Count', color='Mode', barmode='group', title="Simulation Results: Test vs Control")
+
     return fig
 
 def calculate_percentage_change(test_val, control_val):
+
     return ((test_val - control_val) / control_val) * 100 if control_val else float('inf')
+
+def visualize_patient_pathway(patient):
+    # Nodes for each unique location and final status
+    unique_locations = list(set(patient.visits + [patient.status]))
+    labels = unique_locations
+
+    # Edges for transitions between locations
+    edges = list(zip(patient.visits, patient.visits[1:] + [patient.status]))
+
+    # Creating nodes and edges for the network graph
+    edge_x = []
+    edge_y = []
+    node_x = []
+    node_y = []
+    for i, label in enumerate(labels):
+        node_x.append(i)
+        node_y.append(0)
+
+    for edge in edges:
+        x0, y0 = node_x[labels.index(edge[0])], node_y[labels.index(edge[0])]
+        x1, y1 = node_x[labels.index(edge[1])], node_y[labels.index(edge[1])]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y, line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines'
+    )
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y, text=labels, mode='markers+text', hoverinfo='text', marker=dict(size=10)
+    )
+
+    # Creating the figure
+    fig = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(
+        title=dict(text="Patient Pathway Network Graph"),
+        showlegend=False,
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        hovermode='closest'
+    ))
+
+    return fig
+
 
 def main():
     st.title('Patient Pathway Simulation')
@@ -120,9 +171,10 @@ def main():
         disease_data = pd.read_excel(uploaded_file)
         num_patients = int(disease_data['Number of Patients'].sum())
 
-        test_results = run_simulation(disease_data, num_patients, mode='test')
-        control_results = run_simulation(disease_data, num_patients, mode='control')
+        test_results, test_patients = run_simulation(disease_data, num_patients, mode='test')
+        control_results, control_patients = run_simulation(disease_data, num_patients, mode='control')
 
+        # Now use test_results and control_results as before
         st.plotly_chart(plot_combined_results(test_results, control_results))
 
         # Reporting Observations with Percentage Changes
@@ -140,6 +192,19 @@ def main():
         st.write(f"Test Mode - Average Visits: {test_results['Average Visits']:.2f}")
         st.write(f"Control Mode - Average Visits: {control_results['Average Visits']:.2f}")
         st.write(f"Percentage Change: {avg_visits_change_pct:.2f}%")
+
+        # Section for individual patient pathway visualization
+        st.write("## Individual Patient Pathway Visualization")
+        if uploaded_file is not None and num_patients:
+            group = st.radio("Choose Group for Pathway Visualization", ("Test Group", "Control Group"))
+            if group == "Test Group":
+                patient_list = test_patients
+            else:
+                patient_list = control_patients
+
+            patient_id_to_visualize = st.selectbox("Select Patient ID", range(1, num_patients + 1))
+            selected_patient = next(p for p in patient_list if p.patient_id == patient_id_to_visualize)
+            st.plotly_chart(visualize_patient_pathway(selected_patient))
 
 if __name__ == "__main__":
     main()
