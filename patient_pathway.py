@@ -146,37 +146,33 @@ def calculate_percentage_change(test_val, control_val):
     return ((test_val - control_val) / control_val) * 100 if control_val else float('inf')
 
 def visualize_patient_pathway(patient):
-    # Separate treatment locations and outcome
-    treatment_locations = patient.visits
-    outcome = patient.status
+    # Nodes for each visit and the final status
+    pathway_nodes = patient.visits + [patient.status]
 
-    # Create a unique list of locations and add the outcome at the end
-    unique_locations = list(set(treatment_locations))
-    unique_locations.sort(key=treatment_locations.index)  # Maintain the order of visits
-    unique_locations.append(outcome)
-
-    # Assign positions
-    node_x = {location: i for i, location in enumerate(unique_locations)}
-    node_y = {location: 0 for location in unique_locations}  # Keeping all nodes at y=0 for simplicity
-
-    # Create edges
+    # Creating nodes and edges for the network graph
     edge_x = []
     edge_y = []
-    for i in range(len(treatment_locations)):
-        x0, y0 = node_x[treatment_locations[i]], node_y[treatment_locations[i]]
-        if i < len(treatment_locations) - 1:
-            x1, y1 = node_x[treatment_locations[i + 1]], node_y[treatment_locations[i + 1]]
-        else:
-            x1, y1 = node_x[outcome], node_y[outcome]
+    node_x = []
+    node_y = []
+
+    # Assign positions
+    for i, node in enumerate(pathway_nodes):
+        node_x.append(i)  # Incremental x position for each visit
+        node_y.append(0)  # Keeping y constant for simplicity
+
+    # Create edges
+    for i in range(len(patient.visits)):
+        x0, y0 = node_x[i], node_y[i]
+        x1, y1 = node_x[i + 1], node_y[i + 1]
         edge_x.extend([x0, x1, None])
         edge_y.extend([y0, y1, None])
 
     edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines')
-    node_trace = go.Scatter(x=list(node_x.values()), y=list(node_y.values()), text=unique_locations, mode='markers+text', hoverinfo='text', marker=dict(size=10))
+    node_trace = go.Scatter(x=node_x, y=node_y, text=pathway_nodes, mode='markers+text', hoverinfo='text', marker=dict(size=10))
 
-    # Creating the figure
+    # Creating the figure with an updated title
     fig = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(
-        title=dict(text="Patient Pathway Network Graph"),
+        title=dict(text=f"Patient Pathway Network Graph - Patient ID: {patient.patient_id}, Disease: {patient.disease}"),
         showlegend=False,
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
