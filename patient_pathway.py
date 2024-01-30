@@ -1,7 +1,7 @@
+import streamlit as st
 import pandas as pd
+import plotly.express as px
 import random
-import io
-import copy
 
 class Patient:
     def __init__(self, patient_id, age, disease):
@@ -22,8 +22,7 @@ class Patient:
         self.referral_options = options
 
     def print_status(self):
-        #print(f"Patient {self.patient_id}: Status - {self.status}, Visits - {self.visit_count}, Path - {self.visits}")
-        return
+        print(f"Patient {self.patient_id}: Status - {self.status}, Visits - {self.visit_count}, Path - {self.visits}")
 
 def generate_patients(disease_data, num_patients):
     patients = []
@@ -40,45 +39,36 @@ def generate_patients(disease_data, num_patients):
 
     return patients
 
-def run_simulation(file_path, mode='test'):
-    clinic_data = pd.read_excel(file_path)
-    clinic_data['Number of Patients'] = pd.to_numeric(clinic_data['Number of Patients'], errors='coerce')
-    clinic_data['Number of Patients'] = clinic_data['Number of Patients'].fillna(0)
-    num_patients = int(clinic_data['Number of Patients'].sum())
-
-    patients = generate_patients(clinic_data, num_patients)
+def run_simulation(disease_data, num_patients, mode='test'):
+    patients = generate_patients(disease_data, num_patients)
 
     for patient in patients:
         while patient.status not in ['Correct Diagnosis', 'Incorrect Diagnosis', 'No Diagnosis']:
             if patient.status == 'Waiting':
                 patient.visit_count += 1
-                disease_row = clinic_data[clinic_data['Disease List'] == patient.disease]
+                disease_row = disease_data[disease_data['Disease List'] == patient.disease]
                 pcp_success_rate = disease_row['PCP'].values[0] / 100
                 referral_options = disease_row.columns[2:-1].tolist()
                 patient.set_referral_options(referral_options)
 
                 if random.random() <= pcp_success_rate:
                     patient.final_diagnosis('Correct Diagnosis')
-                    #print(f"Patient {patient.patient_id} correctly diagnosed by PCP")
                 else:
                     if random.random() > 0.9:
                         patient.final_diagnosis('Incorrect Diagnosis')
-                        #print(f"Patient {patient.patient_id} incorrectly diagnosed by PCP")
                     else:
                         patient.status = 'Referred'
-                        #print(f"Patient {patient.patient_id} referred by PCP")
                 patient.print_status()
 
             elif patient.status == 'Referred':
                 patient.visit_count += 1
-                disease_row = clinic_data[clinic_data['Disease List'] == patient.disease]
+                disease_row = disease_data[disease_data['Disease List'] == patient.disease]
                 clinic_probabilities = disease_row.iloc[0, 2:-1] / 100
                 clinic_probabilities = clinic_probabilities.sort_values(ascending=False)
                 unvisited_clinics = clinic_probabilities.index.difference(patient.visits)
 
                 if unvisited_clinics.empty:
                     patient.final_diagnosis('No Diagnosis')
-                    #print(f"Patient {patient.patient_id} has no diagnosis (no more clinics)")
                     continue
 
                 if mode == 'test':
@@ -87,23 +77,17 @@ def run_simulation(file_path, mode='test'):
                     referral_clinic = random.choice(unvisited_clinics.tolist())
 
                 patient.visit_clinic(referral_clinic)
-                #print(f"Patient {patient.patient_id} visiting {referral_clinic}")
 
                 clinic_success_rate = clinic_probabilities[referral_clinic]
 
                 if random.random() <= clinic_success_rate:
                     patient.final_diagnosis('Correct Diagnosis')
-                    #print(f"Patient {patient.patient_id} correctly diagnosed at {referral_clinic}")
                 else:
-                    if random.random() > 0.7:
+                    if random.random() > 0.9:
                         patient.final_diagnosis('Incorrect Diagnosis')
-                        #print(f"Patient {patient.patient_id} incorrectly diagnosed at {referral_clinic}")
                     else:
                         patient.status = 'Waiting'
-                        #print(f"Patient {patient.patient_id} sent back to PCP from {referral_clinic}")
-                patient.print_status()
 
-    # Results Calculation
     results = {
         'Total Patients': len(patients),
         'Correctly Diagnosed': sum(p.status == 'Correct Diagnosis' for p in patients),
@@ -114,8 +98,48 @@ def run_simulation(file_path, mode='test'):
 
     return results
 
-file_path = 'Neurology_Sim_Parameters.xlsx'
-test_results = run_simulation(file_path, mode='test')
-print("Test Set Results:", test_results)
-control_results = run_simulation(file_path, mode='control')
-print("Control Set Results:", control_results)
+def plot_combined_results(test_results, control_results):
+    data = {
+        "Mode": ["Test"] * 3 + ["Control"] * 3,
+        "Outcomes": ["Correct Diagnosis", "Incorrect Diagnosis", "No Diagnosis"] * 2,
+        "Count": [test_results[k] for k in ["Correctly Diagnosed", "Incorrectly Diagnosed", "No Diagnosis"]] + 
+                 [control_results[k] for k in ["Correctly Diagnosed", "Incorrectly Diagnosed", "No Diagnosis"]]
+    }
+    df = pd.DataFrame(data)
+    fig = px.bar(df, x='Outcomes', y='Count', color='Mode', barmode='group', title="Simulation Results: Test vs Control")
+    return fig
+
+def calculate_percentage_change(test_val, control_val):
+    return ((test_val - control_val) / control_val) * 100 if control_val else float('inf')
+
+def main():
+    st.title('Patient Pathway Simulation')
+
+    uploaded_file = st.file_uploader("Choose a file")
+    if uploaded_file is not None:
+        disease_data = pd.read_excel(uploaded_file)
+        num_patients = int(disease_data['Number of Patients'].sum())
+
+        test_results = run_simulation(disease_data, num_patients, mode='test')
+        control_results = run_simulation(disease_data, num_patients, mode='control')
+
+        st.plotly_chart(plot_combined_results(test_results, control_results))
+
+        # Reporting Observations with Percentage Changes
+        st.write("## Observations")
+        st.write("### Diagnostic Accuracy Changes")
+        test_correct_pct = (test_results['Correctly Diagnosed'] / num_patients) * 100
+        control_correct_pct = (control_results['Correctly Diagnosed'] / num_patients) * 100
+        accuracy_change_pct = calculate_percentage_change(test_correct_pct, control_correct_pct)
+        st.write(f"Test Mode - Correct Diagnoses: {test_correct_pct:.2f}%")
+        st.write(f"Control Mode - Correct Diagnoses: {control_correct_pct:.2f}%")
+        st.write(f"Percentage Change: {accuracy_change_pct:.2f}%")
+
+        st.write("### Average Visits")
+        avg_visits_change_pct = calculate_percentage_change(test_results['Average Visits'], control_results['Average Visits'])
+        st.write(f"Test Mode - Average Visits: {test_results['Average Visits']:.2f}")
+        st.write(f"Control Mode - Average Visits: {control_results['Average Visits']:.2f}")
+        st.write(f"Percentage Change: {avg_visits_change_pct:.2f}%")
+
+if __name__ == "__main__":
+    main()
